@@ -3,8 +3,15 @@ use strict;
 use warnings;
 
 use XML::Simple;
+use Data::Dumper;
+
 
 my $ref = XMLin($ARGV[0]);
+
+
+if (ref($ref->{'host'}) ne "ARRAY") {
+	$ref->{'host'} = [ $ref->{'host'} ];
+}
 
 foreach my $host (@{$ref->{'host'}}) {
 	
@@ -28,7 +35,9 @@ foreach my $host (@{$ref->{'host'}}) {
 		} else {
 			push @ports, $r->{portid};
 		}
-		printf "%s\t%s\n", $ip, join(',', @ports);
+
+		@ports = grep defined, @ports;	
+		printf "%s\t%s\n", $ip, @ports ? join(',', @ports) : "";
 	}
 
 }
