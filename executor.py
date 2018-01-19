@@ -36,7 +36,8 @@ def load():
 def loadConfig():
 	global settings
 	global root
-	settings={}
+	global state
+	new_settings={}
 	try:
 		with open(root.nametowidget("config_frame.config_entry").get(),'r') as config:
 			for line in config:
@@ -47,16 +48,21 @@ def loadConfig():
 						arr = s.split('=', 1)
 						if len(arr) == 2:
 							if arr[0].startswith("CMD"):
-								settings[arr[0]] = arr[1]	#.strip('"\'')
+								new_settings[arr[0]] = arr[1]	#.strip('"\'')
+							elif arr[0].startswith("MAX_RUNNING") and state['changed_max_running']:
+								new_settings[arr[0]] = settings[arr[0]]
 							else:
-								settings[arr[0]] = arr[1].strip('"\'')
+								new_settings[arr[0]] = arr[1].strip('"\'')
 								
 					except Exception as e:
 						print(e)
 	except Exception as e:
 		print("Exception: {}".format(e))
 		return
+	
+	settings=new_settings
 	print("Settings Loaded:\n")
+	
 	for k,v in settings.items():
 		print("{:20}{}{}".format(k,":"+" "*5,v))
 		print("-"*80)
@@ -330,8 +336,7 @@ def tmpFile():
 		tmp_file.close()	
 		yield name
 	finally:
-		#os.unlink(tmp_file.name)
-		print("Deleted {}".format(tmp_file.name))
+		os.unlink(tmp_file.name)
 
 def startManagedJob(managed_job):
 	global children
@@ -405,7 +410,7 @@ class Job:
 				#self.attempt = 0
 				with tmpFile() as outfile, tmpFile() as stdout, tmpFile() as stderr:
 					self._start(outfile, stdout, stderr)
-					print("Exiting start!")
+					#print("Exiting start!")
 				self.stoptime = time.time()
 		except Exception as e:
 			print("FATAL ERROR: JOB DEATH - {}".format(self.target))
@@ -507,9 +512,9 @@ class Job:
 				#if self.settings['STDOUT_PLACEHOLDER'] in self.unprimed_settings['CMD_']:
 				with open(resources['stdout'], 'wb') as stdout:
 					stdout.write(msg_out)
-					print("Wrote:\n{}\n\nTo:{}".format(msg_out, resources['stdout']))
+					#print("Wrote:\n{}\n\nTo:{}".format(msg_out, resources['stdout']))
 
-			if self.settings['STDERR_PLACEHOLDER'] in self.unprimed_settings['CMD_{}'.format(i)]:
+			if self.settings['STDERR_PLACEHOLDER'] in self.unprimed_settings['CMD_{}'.format(ret_val)]:
 				with open(resources['stderr'], 'wb') as stderr:
 					stderr.write(msg_err)
 
@@ -542,7 +547,10 @@ class Job:
 			if os.name == 'posix':
 				proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=shell, close_fds=True)
 			else:
-				proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=shell)
+				#patch: hide cmd popup on windows
+				startupinfo = subprocess.STARTUPINFO()
+				startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+				proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=shell, startupinfo=startupinfo)
 
 			self.sub_proc = proc
 			#print(self.sub_proc)
@@ -1115,13 +1123,13 @@ def checkFree():
 	while not state['quit']:
 		try:
 			#print("\nChecking Free...")	
-			print("Executor queue depth: {}".format(state['executor']._work_queue.qsize()))
-			print("Sitrep queue depth: {}".format(state['queue']['sitrep'].qsize()))
-			try:
-				print("Sitrep peek {}".format(time.time() - state['queue']['sitrep'].queue[0][0]))
-			except Exception as e:
-				#print(e)
-				pass
+			#print("Executor queue depth: {}".format(state['executor']._work_queue.qsize()))
+			#print("Sitrep queue depth: {}".format(state['queue']['sitrep'].qsize()))
+			#try:
+			#	print("Sitrep peek {}".format(time.time() - state['queue']['sitrep'].queue[0][0]))
+			#except Exception as e:
+			#	#print(e)
+			#	pass
 
 			updateStats()
 			
@@ -1951,8 +1959,10 @@ def attachStatusFrame(root):
 def updateMaxRunning(*args):
 	global settings
 	global root
+	global state
 	try:
 		i = int(root.nametowidget("management_frame.max_running_spinbox").get())
+		state['changed_max_running']=True
 		if i >= 0:
 			if settings:
 				settings['MAX_RUNNING'] = i
@@ -2225,6 +2235,7 @@ def initState():
 	d['config_vals'] = {}
 
 	d['help'] = initHelp()
+	d['changed_max_running']=False
 	#d['check']['queued'] = True
 	return d
 
