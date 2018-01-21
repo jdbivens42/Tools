@@ -1,4 +1,14 @@
 #!/usr/bin/perl
+
+#Input to ini:
+# out_file_name	regex
+
+#Input to pl:
+#xml_file	regex
+
+#Output from pl:
+# service_name	address	port
+
 use strict;
 use warnings;
 
@@ -25,7 +35,7 @@ foreach my $host (@{$ref->{'host'}}) {
 	}
 	
 	if (defined $host->{ports}) {
-		my @links = ();
+		my @res = ();
 		my $r = %{$host->{ports}}{port};
 		
 		if (ref($r) ne "ARRAY") {
@@ -33,19 +43,17 @@ foreach my $host (@{$ref->{'host'}}) {
 		} 
 		foreach my $p (@$r) {
 			if (exists $p->{service} and exists $p->{service}->{name}) {
-				if ($p->{service}->{name} =~ /http/  ) {
-					my $proto = "http";
-					my $tunnel = $p->{service}->{tunnel};
-					if ($tunnel && $tunnel =~ /ssl/){
-						$proto.="s";
-					}
-					push @links, "$proto://$ip:$p->{portid}/";
+				if ($p->{service}->{name} =~ /($ARGV[1])/  ) {
+					my @keys = (qw(name product version tunnel));
+					my @info =();
+					push @info, $p->{service}->{$_} for (@keys);
+					push @res, join( "\t", $1, $ip, $p->{portid}, join( "\t", grep defined, @info ) );
 				}
 
 			}
 		}
 
-		print @links ? join("\n", @links)."\n" : "";
+		print @res ? join("\n", @res)."\n" : "";
 	}
 
 }
