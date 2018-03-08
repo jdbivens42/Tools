@@ -5,6 +5,6 @@
 # useful for giving default values when config files are missing
 contents=$(cat $1 2>/dev/null)
 contents2=$(cat $2 2>/dev/null)
-if [ -n $3 ]; then contents3=$(cat $3 2>/dev/null); fi
+if [ -n "$3" ]; then contents3=$(cat $3 2>/dev/null); fi
 
 echo ${contents:-${contents2:-$contents3}}
