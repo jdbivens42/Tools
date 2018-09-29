@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import sys
 import os
+import uuid
 
 base_prefix = """
 <!DOCTYPE html>
@@ -49,6 +50,7 @@ base_prefix = """
 
 
 </style>
+<script src="jquery-3.3.1.min.js"></script>
 </head>
 <body>
 
@@ -67,10 +69,17 @@ function toggleAcc(acc) {
     var obj = panel.firstElementChild;
     if (obj){
 	if (obj.className=="disabled") {
-		var d = document.createElement("div");
-		d.innerHTML = obj.textContent;
-		panel.replaceChild(d, obj);
-		obj = d.firstElementChild;
+		console.log("activing element");
+		//var d = document.createElement("div");
+		//panel.replaceChild(d, obj);
+
+		$(panel).children().first().replaceWith(obj.textContent);
+
+		//d.innerHTML = obj.textContent;
+		//$(d).html(obj.textContent);
+		
+		//obj = d.firstElementChild;
+		obj = $(panel).children().first().children().first();
 	}
 	var doc = obj.contentDocument;
         if(doc) {
@@ -100,6 +109,16 @@ function resizePanels(panel) {
 }
 
 function resize(obj){
+
+	console.log(obj);
+        obj.style.height = obj.scrollHeight + "px";
+	panel = obj.parentElement;
+	resizePanels(panel);    
+
+}
+
+/*
+function resize(obj){
 	var doc = obj.contentDocument;
         if(doc) {
             var t = doc.firstElementChild;
@@ -107,11 +126,12 @@ function resize(obj){
                         obj.style.height = t.scrollHeight + "px";
                 }
         }
-
-	panel = obj.parentElement.parentElement;
+	console.log(obj);
+	panel = $(obj).closest(".panel");
+	console.log(panel);
 	resizePanels(panel);    
 }
-
+*/
 </script>
 </body>
 </html>
@@ -124,12 +144,46 @@ base = """
 </div>
 """
 
+
+#base_obj =""" 
+#<textarea class ="disabled"><object class="report_obj" type="text/html;base64" onload="resize(this)" data="{}"></object></textarea>
+#"""
+
 base_obj =""" 
-<textarea class ="disabled"><object class="report_obj" onload="resize(this)" data="{}"></object></textarea>
+<textarea class ="disabled">
+<div id={} alight="left" class="report_obj"></div>
+<script>
+console.log("Loading element");
+tag=document.currentScript;
+console.log(tag);
+
+$.get( "{}",
+ function(data) {{ 
+	console.log("Injecting html..");
+        //d = tag.previousSibling;
+	console.log(tag);
+	//tag.id="here";
+        //var d = document.createElement("div");
+	//d.class = "report_obj";
+	//$(tag).replaceWith(d);
+	//console.log("impossible");
+	d = $("#{}")[0];
+	console.log(d);
+	$(d).html(data);
+	//console.log(d);
+	console.log("Resizing");
+	resize(d);
+  }});
+</script>
+
+
+</textarea>
 """
+# Note: literal curly braces above are doubled so Python accepts it
 
 def makeAccObject(dir, filename):
-	obj = base_obj.format(os.path.join(dir,filename))
+	target_id = uuid.uuid4()
+	obj = base_obj.format(target_id, os.path.join(dir,filename), target_id)
 	return base.format(filename, obj)
 
 def wrapAccObjects(target, objs):
@@ -183,7 +237,3 @@ if __name__ == '__main__':
 		print("Done! {} Report written to {}".format(sys.argv[2], sys.argv[1]))
 	except Exception as e:
 		print(e)
-
-
-					
-
