@@ -68,33 +68,33 @@ function toggleAcc(acc) {
     var panel = acc.nextElementSibling;
     var obj = panel.firstElementChild;
     if (obj){
-	if (obj.className=="disabled") {
-		console.log("activing element");
-		//var d = document.createElement("div");
-		//panel.replaceChild(d, obj);
+    if (obj.className=="disabled") {
+        console.log("activing element");
+        //var d = document.createElement("div");
+        //panel.replaceChild(d, obj);
 
-		$(panel).children().first().replaceWith(obj.textContent);
+        $(panel).children().first().replaceWith(obj.textContent);
 
-		//d.innerHTML = obj.textContent;
-		//$(d).html(obj.textContent);
-		
-		//obj = d.firstElementChild;
-		obj = $(panel).children().first().children().first();
-	}
-	var doc = obj.contentDocument;
+        //d.innerHTML = obj.textContent;
+        //$(d).html(obj.textContent);
+        
+        //obj = d.firstElementChild;
+        obj = $(panel).children().first().children().first();
+    }
+    var doc = obj.contentDocument;
         if(doc) {
             var t = doc.firstElementChild;
-		if (t) {
-			obj.style.height = t.scrollHeight + "px";
-		}
-	} else {
-		resizePanels(panel);
-	}
+        if (t) {
+            obj.style.height = t.scrollHeight + "px";
+        }
+    } else {
+        resizePanels(panel);
+    }
         
     }
 }
 function resizePanels(panel) {
-	do {
+    do {
             if (panel.style.maxHeight && panel.previousElementSibling.className == "accordion"){
                       panel.style.maxHeight = null;
             } else {
@@ -110,26 +110,26 @@ function resizePanels(panel) {
 
 function resize(obj){
 
-	console.log(obj);
+    console.log(obj);
         obj.style.height = obj.scrollHeight + "px";
-	panel = obj.parentElement;
-	resizePanels(panel);    
+    panel = obj.parentElement;
+    resizePanels(panel);    
 
 }
 
 /*
 function resize(obj){
-	var doc = obj.contentDocument;
+    var doc = obj.contentDocument;
         if(doc) {
             var t = doc.firstElementChild;
                 if (t) {
                         obj.style.height = t.scrollHeight + "px";
                 }
         }
-	console.log(obj);
-	panel = $(obj).closest(".panel");
-	console.log(panel);
-	resizePanels(panel);    
+    console.log(obj);
+    panel = $(obj).closest(".panel");
+    console.log(panel);
+    resizePanels(panel);    
 }
 */
 </script>
@@ -151,7 +151,7 @@ base = """
 
 base_obj =""" 
 <textarea class ="disabled">
-<div id={} alight="left" class="report_obj"></div>
+<div id={} align="left" class="report_obj"></div>
 <script>
 console.log("Loading element");
 tag=document.currentScript;
@@ -159,20 +159,20 @@ console.log(tag);
 
 $.get( "{}",
  function(data) {{ 
-	console.log("Injecting html..");
+    console.log("Injecting html..");
         //d = tag.previousSibling;
-	console.log(tag);
-	//tag.id="here";
+    console.log(tag);
+    //tag.id="here";
         //var d = document.createElement("div");
-	//d.class = "report_obj";
-	//$(tag).replaceWith(d);
-	//console.log("impossible");
-	d = $("#{}")[0];
-	console.log(d);
-	$(d).html(data);
-	//console.log(d);
-	console.log("Resizing");
-	resize(d);
+    //d.class = "report_obj";
+    //$(tag).replaceWith(d);
+    //console.log("impossible");
+    d = $("#{}")[0];
+    console.log(d);
+    $(d).html(data);
+    //console.log(d);
+    console.log("Resizing");
+    resize(d);
   }});
 </script>
 
@@ -182,58 +182,65 @@ $.get( "{}",
 # Note: literal curly braces above are doubled so Python accepts it
 
 def makeAccObject(dir, filename):
-	target_id = uuid.uuid4()
-	obj = base_obj.format(target_id, os.path.join(dir,filename), target_id)
-	return base.format(filename, obj)
+    target_id = uuid.uuid4()
+    obj = base_obj.format(target_id, os.path.join(dir,filename), target_id)
+    return base.format(filename, obj)
 
 def wrapAccObjects(target, objs):
-	return base.format(target, "\n".join(objs))
+    return base.format(target, "\n".join(objs))
 
 
 if __name__ == '__main__':
-        if len(sys.argv) != 3:
-                print "Usage: html_gen.py <output_file> <report_title>"
-                print("Directories named like 0.0.0.0 must exist already and contain data")
-                sys.exit(0)
-	
-	print("Building {} Report".format(sys.argv[2]))
+    if len(sys.argv) != 4:
+        print "Usage: html_gen.py <hosts_file> <output_file> <report_title>"
+        print("Directories named like 0.0.0.0 must exist already and contain data")
+        sys.exit(0)
+    
+    print("Building {} Report".format(sys.argv[3]))
+    print("For hosts: {}".format(sys.argv[1]))
 
-	reports = []
-	dirs = next(os.walk(os.getcwd()))[1]
-	dirs = [d for d in dirs if len(d.split('.')) == 4]
-	dirs.sort( key=lambda s: map(int, s.split('.')))
+    hosts = []
+    with open(sys.argv[1], 'r') as hosts_file:
+        hosts = hosts_file.read().splitlines()
 
-	for dir in dirs:		
-		print("\nGenerating report for {}".format(dir))
-		objs = []
-		(dirpath, dirnames, files) = next(os.walk(dir))
-		for category in dirnames:
-			cat_objs = []
-			print("\tGenerating report for category {}".format(category))
-			cat_path = os.path.join(dir,category)
-			for file in next(os.walk(cat_path))[2]:
-				if not file.startswith('.'):
-					print("\t\tGenerating object {}".format(file))
-					cat_objs.append(makeAccObject(cat_path, file))
-			print("\tFinalizing report for {}".format(category))
-			if cat_objs:
-				objs.append(wrapAccObjects(category, cat_objs))	
-		
-		for file in files:
-			if not file.startswith('.'):
-				print("\tGenerating object {}".format(file))
-				objs.append(makeAccObject(dir, file))
-		print("Finalizing report for {}".format(dir))
-		reports.append(wrapAccObjects(dir, objs))
-	print("Writing Final Report...")
-	try:
-		with open(sys.argv[1], 'w') as out:
-			out.write("{}{}{}".format(
-				base_prefix.replace('{report_title}', sys.argv[2], 1),
-				'\n'.join(reports), 
-				base_suffix
-				)
-			)
-		print("Done! {} Report written to {}".format(sys.argv[2], sys.argv[1]))
-	except Exception as e:
-		print(e)
+
+    reports = []
+    dirs = next(os.walk(os.getcwd()))[1]
+
+    dirs = [d for d in dirs if len(d.split('.')) == 4 and d in hosts]
+    dirs.sort( key=lambda s: map(int, s.split('.')))
+
+    for dir in dirs:        
+        print("\nGenerating report for {}".format(dir))
+        objs = []
+        (dirpath, dirnames, files) = next(os.walk(dir))
+        for category in dirnames:
+            cat_objs = []
+            print("\tGenerating report for category {}".format(category))
+            cat_path = os.path.join(dir,category)
+            for file in next(os.walk(cat_path))[2]:
+                if not file.startswith('.'):
+                    print("\t\tGenerating object {}".format(file))
+                    cat_objs.append(makeAccObject(cat_path, file))
+            print("\tFinalizing report for {}".format(category))
+            if cat_objs:
+                objs.append(wrapAccObjects(category, cat_objs)) 
+        
+        for file in files:
+            if not file.startswith('.'):
+                print("\tGenerating object {}".format(file))
+                objs.append(makeAccObject(dir, file))
+        print("Finalizing report for {}".format(dir))
+        reports.append(wrapAccObjects(dir, objs))
+    print("Writing Final Report...")
+    try:
+        with open(sys.argv[2], 'w') as out:
+            out.write("{}{}{}".format(
+                base_prefix.replace('{report_title}', sys.argv[3], 1),
+                '\n'.join(reports), 
+                base_suffix
+                )
+            )
+        print("Done! {} Report written to {}".format(sys.argv[3], sys.argv[2]))
+    except Exception as e:
+        print(e)
