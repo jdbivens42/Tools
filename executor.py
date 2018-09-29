@@ -88,7 +88,7 @@ def getTargetsFile():
     return root.nametowidget("config_frame.targets_entry").get()
 
 # will throw away duplicate targets
-def loadTargets():
+def loadTargets(force=False):
     global jobs
     global settings
     global manager
@@ -536,9 +536,6 @@ class Job:
 
         self.status="RUNNING_{}".format(stage)
 
-        print("Status: {}".format(self.status))
-
-    
         cmd = self.settings["CMD_{}".format(stage)]
         shell = self.settings["SHELL_{}".format(stage)]
         
@@ -553,7 +550,6 @@ class Job:
             timeout = int(self.settings['TIMEOUT_{}'.format(stage)])
 
         env = os.environ.copy()
-        print("Script Dir: {}".format(script_dir))
 
         with open(os.path.join(script_dir, "executor.env.default" ), "r") as env_conf:
             for e in env_conf:
