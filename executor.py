@@ -21,8 +21,11 @@ import re
 import queue
 import random
 import traceback
-def browse(entry, ext):
-    filename = filedialog.askopenfilename(title = "Select file",filetypes = (("{} files".format(ext),"*.{}".format(ext)),("all files","*.*")))
+def browse(entry, exts, initialdir=None):
+    exts = [("{} files".format(ext), "*.{}".format(ext) ) for ext in exts]
+    exts.append(("all files","*.*"))
+    
+    filename = filedialog.askopenfilename(initialdir=initialdir, title = "Select file",filetypes = exts)
     if filename:
         entry.delete(0,END)
         entry.insert(0,filename)    
@@ -80,6 +83,10 @@ def loadConfig():
         print("MAX_RUNNING invalid: ")
         print(e)
 
+def getTargetsFile():
+    global root
+    return root.nametowidget("config_frame.targets_entry").get()
+
 # will throw away duplicate targets
 def loadTargets():
     global jobs
@@ -87,6 +94,7 @@ def loadTargets():
     global manager
     global root
     global state
+    global targets_list
     
     if settings:
         if jobs:
@@ -100,7 +108,8 @@ def loadTargets():
         #       listbox.delete(c)   
         
         try:
-            with open(root.nametowidget("config_frame.targets_entry").get(),'r') as targets_file:
+            targets_list = getTargetsFile()
+            with open(targets_list,'r') as targets_file:
                 if not manager:
                     BaseManager.register('Job', Job)
                     manager = BaseManager()
@@ -527,7 +536,7 @@ class Job:
 
         self.status="RUNNING_{}".format(stage)
 
-        #print("Status: {}".format(self.status))
+        print("Status: {}".format(self.status))
 
     
         cmd = self.settings["CMD_{}".format(stage)]
@@ -544,10 +553,30 @@ class Job:
             timeout = int(self.settings['TIMEOUT_{}'.format(stage)])
 
         env = os.environ.copy()
-        with open("./executor.env", "r") as env_conf:
-            for e in env_conf.read().splitlines():
+        print("Script Dir: {}".format(script_dir))
+
+        with open(os.path.join(script_dir, "executor.env.default" ), "r") as env_conf:
+            for e in env_conf:
+                e = e.strip()
                 k,v = e.split("=",1)
                 env[k]=v
+        try:
+
+
+            env_custom = os.path.join(os.path.dirname(targets_list) , "executor.env")
+
+            with open(env_custom, "r") as env_conf:
+                for e in env_conf:
+                    e = e.strip()
+                    k,v = e.split("=",1)
+                    env[k]=v
+
+        except Exception as e:
+            print("WARNING: executor.env not defined for the target directory")
+            env["EXECUTOR_OUTDIR"] = os.path.dirname(targets_list)
+            print("Set outdir to {}".format(env["EXECUTOR_OUTDIR"]))
+
+
 
         if cmd:
             if os.name == 'posix':
@@ -1697,10 +1726,13 @@ def createConfigEditor():
 
 
 def attachConfigFrame(root):
+    global script_dir
     config_frame = Frame(root, name="config_frame")
     config_frame.grid(row=0,column=0,sticky=E+W, columnspan=6)
 
-    Button(config_frame, text="Config File:", command=lambda:browse(config_entry,'ini')).grid(row=0,column=0,sticky=W)
+    ini_dir = os.path.join(script_dir, "ini")
+
+    Button(config_frame, text="Config File:", command=lambda:browse(config_entry, ['ini'], initialdir=ini_dir)).grid(row=0,column=0,sticky=W)
     
 
     config_entry = Entry(config_frame, name="config_entry")
@@ -1710,10 +1742,10 @@ def attachConfigFrame(root):
     Button(config_frame, text="+", command=createConfigEditor).grid(row=0,column=1, sticky=W)
 
 
-    Button(config_frame, text="Targets File:",command=lambda:browse(targets_entry, 'txt')).grid(row=0,column=3,sticky=W)
+    Button(config_frame, text="Targets File:",command=lambda:browse(targets_entry, ['list', 'range'], initialdir=os.getcwd())).grid(row=0,column=3,sticky=W)
     targets_entry = Entry(config_frame, name="targets_entry")
     
-    targets_entry.insert(END, "hosts.txt")
+    targets_entry.insert(END, os.path.join(os.getcwd(), "hosts.list"))
     targets_entry.grid(row=0,column=4, sticky=E+W, padx=8)
 
 
@@ -2252,7 +2284,10 @@ if __name__ =="__main__":
     global manager
     global children
     global state
-    
+    global script_dir
+
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+
     jobs = None
     manager = None
     settings = None
@@ -2352,4 +2387,8 @@ if __name__ =="__main__":
     #root.iconify()
 
     mainloop()
+
+
+
+
 
