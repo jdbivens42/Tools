@@ -22,8 +22,7 @@ import queue
 import random
 import traceback
 
-import dill #as pickle
-dill.extend(True)
+import ast
 
 def browse(entry, exts, initialdir=None):
     exts = [("{} files".format(ext), "*.{}".format(ext) ) for ext in exts]
@@ -554,19 +553,42 @@ class Job:
                     #    lambda c=self.settings["CHAIN_LOAD_CONFIG"], t=self.settings["CHAIN_LOAD_TARGET"]: chainLoad(c, t)
                     #)
 
-                    #Lambdas aren't pickleable :/
-                    task = ("chainLoad", self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]) 
-                    self.mgmt_q.put(
-                        task
-                    )
+#pppppppppppppp
+                    clconf = self.settings["CHAIN_LOAD_CONFIG"]
+                    try:
+                        clconf = ast.literal_eval(clconf)
+                    except Exception:
+                        clconf = [clconf]
+
+                    for conf in clconf:
                     
-                    print ("CHAIN_LOAD queued task {}!".format(task))
+                        #Lambdas aren't pickleable :/
+                        if "CHAIN_LOAD_FROM_FILE" in self.settings and self.settings["CHAIN_LOAD_FROM_FILE"] == "TRUE":
+                            try:
+                                print("Chain Loading From Target File")
+                                with open(self.settings["CHAIN_LOAD_TARGET"], "r") as chain_targets:
+                                    for t in chain_targets:
+                                        task = ("chainLoad", conf, t.strip("\r\n")) 
+                                        self.mgmt_q.put(
+                                            task
+                                        )
+                                        print ("CHAIN_LOAD queued task {}!".format(task))
+                            except Exception as e:
+                                print(e)
+                        else:
+
+                            task = ("chainLoad", conf, self.settings["CHAIN_LOAD_TARGET"]) 
+                            self.mgmt_q.put(
+                                task
+                            )
+                        
+                            print ("CHAIN_LOAD queued task {}!".format(task))
                 break
 
-    def __flush(self, filename):
+    def __flush(self, filename, msg):
         #if self.settings['STDOUT_PLACEHOLDER'] in self.unprimed_settings['CMD_']:
         with open(filename, 'wb') as f:
-            f.write(msg_out)
+            f.write(msg)
             #print("Wrote:\n{}\n\nTo:{}".format(msg_out, resources['stdout']))
 
     def execWrapper(self, stage, resources):
@@ -640,18 +662,18 @@ class Job:
             if ret_val == self.num_stages + 1 and "CHAIN_LOAD_CONFIG" in self.settings:
                 print("Beginning CHAIN_LOAD...")
                 if out in self.unprimed_settings['CHAIN_LOAD_CONFIG'] or out in self.unprimed_settings['CHAIN_LOAD_TARGET']:
-                    self.__flush(resources['stdout'])
+                    self.__flush(resources['stdout'], msg_out)
 
                 if err in self.unprimed_settings['CHAIN_LOAD_CONFIG'] or err in self.unprimed_settings['CHAIN_LOAD_TARGET']:
-                    self.__flush(resources['stderr'])
+                    self.__flush(resources['stderr'], msg_err)
               
             # CMD_{} is not safe for chain loading (key error) - chain loading handled above                  
             else:
                 if out in self.unprimed_settings['CMD_{}'.format(ret_val)]:
-                    self.__flush(resources['stdout'])
+                    self.__flush(resources['stdout'], msg_out)
 
                 if err in self.unprimed_settings['CMD_{}'.format(ret_val)]:
-                   self.__flush(resources['stderr'])
+                   self.__flush(resources['stderr'], msg_err)
 
         return ret_val
 
