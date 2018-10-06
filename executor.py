@@ -8,7 +8,7 @@ import os
 import tempfile
 from contextlib import contextmanager
 
-from multiprocessing import Process, Manager
+from multiprocessing import Process, Manager, Queue
 from multiprocessing.managers import BaseManager
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,6 +21,10 @@ import re
 import queue
 import random
 import traceback
+
+import dill #as pickle
+dill.extend(True)
+
 def browse(entry, exts, initialdir=None):
     exts = [("{} files".format(ext), "*.{}".format(ext) ) for ext in exts]
     exts.append(("all files","*.*"))
@@ -32,17 +36,17 @@ def browse(entry, exts, initialdir=None):
 def load():
     global state
     loadConfig()
-    state['executor'].submit(loadTargets)
+
+    #state['executor'].submit(loadTargets)
+    state['executor'].submit(lambda x=not state['launched']: loadTargets(x))
     
     #state['check']['queued'] = True
     #state['changed']['queued'] = True
-def loadConfig():
-    global settings
-    global root
-    global state
+
+def readConfig(config_file):
     new_settings={}
     try:
-        with open(root.nametowidget("config_frame.config_entry").get(),'r') as config:
+        with open(config_file,'r') as config:
             for line in config:
                 s=line.strip('\r\n\t')
                 if s and s[0].isalpha():
@@ -61,9 +65,20 @@ def loadConfig():
                         print(e)
     except Exception as e:
         print("Exception: {}".format(e))
-        return
+        return None
+
+    return new_settings
+
+def loadConfig():
+    global settings
+    global root
+    global state
     
-    settings=new_settings
+    tmp = readConfig(root.nametowidget("config_frame.config_entry").get())
+    if not tmp:
+        print("Settings failed to load!")
+        return
+    settings=tmp
     print("Settings Loaded:\n")
     
     for k,v in settings.items():
@@ -98,7 +113,7 @@ def loadTargets(force=False):
     
     if settings:
         if jobs:
-            print("WARNING: Any duplicate or empty targets will be ignored!")
+            print("WARNING: Any duplicate or empty targets will be ignored! (Unclick the 'Launch' button to force)")
         else:
             jobs = {}
         
@@ -111,9 +126,12 @@ def loadTargets(force=False):
             targets_list = getTargetsFile()
             with open(targets_list,'r') as targets_file:
                 if not manager:
+                    print("manager false in loadTargets..")
                     BaseManager.register('Job', Job)
                     manager = BaseManager()
                     manager.start()
+                    #manager.get_server().serve_forever()
+
                 config_file = root.nametowidget("config_frame.config_entry").get()
                 
                 for line in targets_file:
@@ -123,10 +141,12 @@ def loadTargets(force=False):
                         return
                     s=line.strip('\r\n')
                     full_name = "{}\n({})".format(s, os.path.basename(config_file))
-                    if s and not full_name in jobs:
+
+                    #WARNING: FORCING IS NOT SAFE - especially if the jobs is running - may lose control of running jobs
+                    if s and (not full_name in jobs or force):
                         #print("S: {}".format(s))
                         #print("Full: {}".format(full_name))
-                        jobs[full_name] = manager.Job(settings, (s, full_name))
+                        jobs[full_name] = manager.Job(settings, (s, full_name), state['queue']['mgmt'])
                         #print("Putting {}".format(full_name))
                         #listbox.insert("", END, values=(s), iid=full_name)
                         state['queue']['move'].put(
@@ -135,6 +155,11 @@ def loadTargets(force=False):
                         )
             
                         state['queue']['queued'].put_nowait(full_name)
+                    #elif s and force:
+                    #    print("Attempting to force -- cross your fingers! (seriously though)")
+                    #    #crazy dangerous, may desync gui with underlying data
+                    #   state['selection'] = 
+                        
                     else:
                         print("Job {!r} is already loaded. Use a different config file to duplicate jobs.".format(full_name))   
         except Exception as e:
@@ -143,6 +168,70 @@ def loadTargets(force=False):
         print("{} Target(s) Are Loaded.".format(len(targets)))
     else:
         print("Cannot load targets until settings are loaded!")
+
+
+
+
+
+def chainLoad(config_file, target):
+    global jobs
+    global settings
+    global manager
+    global root
+    global state
+    global targets_list
+
+
+
+
+    print("IN CHAIN_LOAD: {} {}".format(config_file, target))
+    local_settings = readConfig(config_file)
+
+
+    full_name = "{}\n({})".format(target, os.path.basename(config_file))
+
+    #WARNING: FORCING IS NOT SAFE - especially if the jobs is running - may lose control of running jobs
+    #if s and (not full_name in jobs or force):
+    # CHAIN_LOAD will always force - super dangerous - don't chain load the same thing more than once
+    if target:
+        #print("S: {}".format(s))
+        #print("Full: {}".format(full_name))
+        if not manager:
+            print("Manager is false in chainLoad...")
+            BaseManager.register('Job', Job)
+            manager = BaseManager()
+            try:
+                print("starting manager...")
+                manager.start()
+            except Exception as e:
+                print(e)
+
+        print("\n\nManager:\n{}\n\n".format(repr(manager)))
+
+        jobs[full_name] = manager.Job(local_settings, (target, full_name), state['queue']['mgmt'])
+        print("job: {} created in chain load".format(full_name))
+        #print("Putting {}".format(full_name))
+        #listbox.insert("", END, values=(s), iid=full_name)
+        print(state['queue']['move'].qsize())
+        state['queue']['move'].put(
+            lambda _j=full_name, _curr_list=None, _new_list='queued',  _tags=(), _values=(target):
+                moveTarget(_j, _curr_list, _new_list, _values, _tags )
+        )
+        print("Move request: {}".format(full_name))
+        
+        state['queue']['queued'].put_nowait(full_name)
+
+        print("Queued: {}".format(full_name))
+    #elif s and force:
+    #    print("Attempting to force -- cross your fingers! (seriously though)")
+    #   #ppppppppp
+    #    #crazy dangerous, may desync gui with underlying data
+    #   state['selection'] = 
+        
+    else:
+        print("Job {!r} is already loaded. Use a different config file to duplicate jobs.".format(full_name))   
+
+
 
 def saveAs(s, caller=None):
     if caller:
@@ -190,8 +279,10 @@ def selectAll(tv_name):
     global state
     state['selection'][tv_name] = []
     c_list = state['listbox'][tv_name].get_children()
+    print("{} has children: {}".format(tv_name, c_list))
     state['selection'][tv_name].extend([c.split("\n")[0] for c in c_list])
     state['listbox'][tv_name].selection_add(c_list)
+    print("seleciton: {}".format(state['selection']))
 
 def selectAllText(tb):
     print("Selecting")
@@ -385,7 +476,8 @@ def startManagedJob(managed_job):
         print("DISABLING LAUNCH")
         state['launched'] = False
 class Job:
-    def __init__(self, settings, target_tuple):     
+    def __init__(self, settings, target_tuple, mgmt_q):     
+        self.mgmt_q = mgmt_q
         self.sub_proc = None
         self.killed = False
         self.stats={}
@@ -449,7 +541,33 @@ class Job:
             #print("Stage: {}".format(stage))
             if stage and stage > self.num_stages:
                 self.status="FINISHED_{}".format(self.attempt)
+
+                #CHECK FOR CHAIN_LOAD
+                if "CHAIN_LOAD_CONFIG" in self.settings:
+                    print("Following next link in CHAIN_LOAD...")
+                    print("Priming - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
+                    self.__prime(stage, resources, "CHAIN_LOAD_CONFIG")
+                    self.__prime(stage, resources, "CHAIN_LOAD_TARGET")
+                    print("Primed - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
+                    #self.chainLoad(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"])
+                    #self.mgmt_q.put(
+                    #    lambda c=self.settings["CHAIN_LOAD_CONFIG"], t=self.settings["CHAIN_LOAD_TARGET"]: chainLoad(c, t)
+                    #)
+
+                    #Lambdas aren't pickleable :/
+                    task = ("chainLoad", self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]) 
+                    self.mgmt_q.put(
+                        task
+                    )
+                    
+                    print ("CHAIN_LOAD queued task {}!".format(task))
                 break
+
+    def __flush(self, filename):
+        #if self.settings['STDOUT_PLACEHOLDER'] in self.unprimed_settings['CMD_']:
+        with open(filename, 'wb') as f:
+            f.write(msg_out)
+            #print("Wrote:\n{}\n\nTo:{}".format(msg_out, resources['stdout']))
 
     def execWrapper(self, stage, resources):
         ret_val = stage + 1
@@ -513,19 +631,27 @@ class Job:
                 self.status="FAILED_{}".format(stage)   
                 ret_val = None
 
-        # only persist to disk if we are continuing TO A DIFFERENT STAGE
+        # only persist to disk if we are continuing TO A DIFFERENT STAGE (or we are chain loading)
         # and a future stage has requested this output
         if ret_val and ret_val != stage and ret_val <= self.num_stages:
-            if self.settings['STDOUT_PLACEHOLDER'] in self.unprimed_settings['CMD_{}'.format(ret_val)]:
+            out = self.settings['STDOUT_PLACEHOLDER']
+            err = self.settings['STDERR_PLACEHOLDER']
 
-                #if self.settings['STDOUT_PLACEHOLDER'] in self.unprimed_settings['CMD_']:
-                with open(resources['stdout'], 'wb') as stdout:
-                    stdout.write(msg_out)
-                    #print("Wrote:\n{}\n\nTo:{}".format(msg_out, resources['stdout']))
+            if ret_val == self.num_stages + 1 and "CHAIN_LOAD_CONFIG" in self.settings:
+                print("Beginning CHAIN_LOAD...")
+                if out in self.unprimed_settings['CHAIN_LOAD_CONFIG'] or out in self.unprimed_settings['CHAIN_LOAD_TARGET']:
+                    self.__flush(resources['stdout'])
 
-            if self.settings['STDERR_PLACEHOLDER'] in self.unprimed_settings['CMD_{}'.format(ret_val)]:
-                with open(resources['stderr'], 'wb') as stderr:
-                    stderr.write(msg_err)
+                if err in self.unprimed_settings['CHAIN_LOAD_CONFIG'] or err in self.unprimed_settings['CHAIN_LOAD_TARGET']:
+                    self.__flush(resources['stderr'])
+              
+            # CMD_{} is not safe for chain loading (key error) - chain loading handled above                  
+            else:
+                if out in self.unprimed_settings['CMD_{}'.format(ret_val)]:
+                    self.__flush(resources['stdout'])
+
+                if err in self.unprimed_settings['CMD_{}'.format(ret_val)]:
+                   self.__flush(resources['stderr'])
 
         return ret_val
 
@@ -643,10 +769,7 @@ class Job:
     def isSleeping(self):
         return self.sleeping
     
-
-
-    def prime(self, stage, resources):
-        k="CMD_{}".format(stage)
+    def __prime(self, stage, resources, k):
         # unprimed_settings must be used to allow new resources to be injected in the event of reschedule
         self.settings[k] = self.unprimed_settings[k].replace(self.settings["TARGET_PLACEHOLDER"], self.target)
         #if stage==2:
@@ -655,14 +778,34 @@ class Job:
         self.settings[k] = self.settings[k].replace(self.settings["TMP_PLACEHOLDER"], resources['outfile'])
         self.settings[k] = self.settings[k].replace(self.settings["STDOUT_PLACEHOLDER"], resources['stdout'])
         self.settings[k] = self.settings[k].replace(self.settings["STDERR_PLACEHOLDER"], resources['stderr'])
-        if stage>1:
-            # this is the most recent return code returned by. This should never throw a key error,
-            # since stage x+1 must never be called unless stage x completed         
-            self.settings[k] = self.settings[k].replace(
+
+        #if stage>1:
+        #    # this is the most recent return code returned by. This should never throw a key error,
+        #    # since stage x+1 must never be called unless stage x completed         
+        #    self.settings[k] = self.settings[k].replace(
+        #        self.settings["RET_PLACEHOLDER"],
+        #        str(self.stats[self.attempt][stage-1]['ret_code'])
+        #    )  
+
+        # this is the most recent return code returned by. This should never throw a key error,
+        #    # since stage x+1 must never be called unless stage x completed         
+        # -- is this still true for chain loading? probably?
+        try:
+            if stage>1:
+                self.settings[k] = self.settings[k].replace(
                 self.settings["RET_PLACEHOLDER"],
-                str(self.stats[self.attempt][stage-1]['ret_code'])
-            )           
-            
+                    str(self.stats[self.attempt][stage-1]['ret_code'])
+                )
+        except Exception as e:
+            print("RET_PLACEHOLDER replacement failed")
+            print("Stage: {} resources:{} k:{}".format(stage, resources, k))
+            print(e)
+
+
+    def prime(self, stage, resources):
+        k="CMD_{}".format(stage)
+        self.__prime(stage, resources, k)
+
         cmd = self.settings[k]
         shell = self.unprimed_settings["SHELL_{}".format(stage)]
         delim = self.unprimed_settings["DELIM_{}".format(stage)]
@@ -702,6 +845,9 @@ class Job:
         self.prev_status = curr
         
         return (prev, curr, self.elapsed_active)
+
+
+
 
     def getStatus(self):
         return self.status
@@ -787,7 +933,7 @@ def moveTarget(target, prev, curr, values, tags):
         try:
             curr_listbox.insert("", END, iid=target, values=values, tags=tags)
         except Exception:
-            print("Insert {} / {} failed".format(target, prev_listbox))
+            print("GUI Insert {} / {} failed -- deleting and adding".format(target, prev_listbox))
             curr_listbox.delete(target)
             curr_listbox.insert("", END, iid=target, values=values, tags=tags)
 
@@ -864,17 +1010,45 @@ def guiQueueConsumer(name):
 
     root.after(int(settings['REFRESH_DELAY']), lambda: guiQueueConsumer(name))
 
+def invokeTask(task, qname):
+    try:
+        if qname =="mgmt" and type(task) is tuple:
+            globals()[task[0]]( *task[1:] )
+        else:
+            task()
+    except Exception as e:
+        print("TASK FAILED:")
+        print(traceback.format_exception(type(e), e, e.__traceback__),
+        file=sys.stderr, flush=True)
+        
+        
+
 def queueConsumer(name):
     global state
     submit = False
 
     while True:
+        if name == 'mgmt':
+            print("Management Queue init!")
+            print(state['queue'][name])
         #print("{} Depth: {}".format(name, state['queue'][name].qsize()))
         task = state['queue'][name].get(block=True)
         
+        if state['quit']:
+            #print("{} is quiting".format(name))
+            break
+
+        if name != 'sitrep':
+           print("{} popped {}".format(name, task))
+
+        if name == "mgmt":
+            print("Management Queue Task: {}".format(task))
+
         #if name != 'sitrep':
         #   print("{} popped {}".format(name, task))
-        if type(task) is tuple:
+        #if type(task) is tuple:
+        elif name == 'sitrep':
+
             #if not submit and time.time() - task[0] > 0.1:
             if state['queue']['sitrep'].qsize() > NUM_CHECKERS*state['executor']._work_queue.qsize():
             #   #print("{} ({}) seconds behind!".format(task[0], time.time() - task[0]))
@@ -882,22 +1056,13 @@ def queueConsumer(name):
             else:
                 submit = False
             task = task[-1]
-        if state['quit']:
-            #print("{} is quiting".format(name))
-            break
+
 
         if submit:
             #print("submitting getSitRep")
             state['executor'].submit(task)
         else:
-            try:
-                task()
-            except Exception as e:
-                print("TASK FAILED:")
-                print(traceback.format_exception(type(e), e, e.__traceback__),
-                    file=sys.stderr, flush=True)
-
-
+            invokeTask(task, name)
 #need one for rescheduled and one for sleeping
 def enqueueWhenReady(dest, target):
     global jobs
@@ -2066,6 +2231,12 @@ def deleteSelectedJobs():
             except Exception:
                 pass
         state['selection'][n] = []
+
+#def forceLoad():
+#    for t in l:
+#        killJob(t, polite=False, move=False)
+
+
 def closeHandler():
     global root
     state['quit'] = True
@@ -2255,6 +2426,8 @@ def initState():
     for n in ['queued', 'rescheduled', 'rescheduled_ready', 'sleeping', 'sleeping_ready']:
         d['queue'][n] = queue.Queue()
 
+    d['queue']['mgmt'] = Manager().Queue()
+
     d['queue']['move'] = queue.Queue(4096)
     d['queue']['sitrep'] = queue.PriorityQueue(4096)
 
@@ -2357,6 +2530,9 @@ if __name__ =="__main__":
     
     for n in ['rescheduled', 'sleeping']:
         state['executor'].submit(queueConsumer, n)
+
+    
+    state['executor'].submit(queueConsumer, "mgmt")
 
     # IF DECREASING MAX_WORKERS, DECREASE THIS AS WELL
     for i in range(NUM_CHECKERS):
