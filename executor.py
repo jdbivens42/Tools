@@ -170,6 +170,43 @@ def loadTargets(force=False):
 
 
 
+def getExecutorEnv():
+    env = os.environ.copy()
+
+    with open(os.path.join(script_dir, "executor.env.default" ), "r") as env_conf:
+        for e in env_conf:
+            e = e.strip()
+            k,v = e.split("=",1)
+            env[k]=v
+    try:
+        env_custom = os.path.join(os.path.dirname(targets_list) , "executor.env")
+
+        with open(env_custom, "r") as env_conf:
+            for e in env_conf:
+                e = e.strip()
+                k,v = e.split("=",1)
+                env[k]=v
+    except Exception as e:
+        #print("WARNING: executor.env not defined for the target directory")
+        env["EXECUTOR_OUTDIR"] = os.path.dirname(targets_list)
+        #print("Set outdir to {}".format(env["EXECUTOR_OUTDIR"]))
+    #print("EXECUTOR VARS:: {}".format({k:v for k,v in env.items() if k.startswith("EXECUTOR")  }))
+    return env
+
+def expandVars(s, default=None, skip_escaped=False):
+    """Expand environment variables of form $var and ${var}.
+       If parameter 'skip_escaped' is True, all escaped variable references
+       (i.e. preceded by backslashes) are skipped.
+       Unknown variables are set to 'default'. If 'default' is None,
+       they are left unchanged.
+    """
+    def replace_var(m, env):
+        return env.get(m.group(2) or m.group(1), m.group(0) if default is None else default)
+
+    env = getExecutorEnv()
+
+    reVar = (r'(?<!\\)' if skip_escaped else '') + r'\$(\w+|\{([^}]*)\})'
+    return re.sub(reVar, lambda m, env=env: replace_var(m, env) , s)
 
 
 def chainLoad(config_file, target):
@@ -548,6 +585,10 @@ class Job:
                     self.__prime(stage, resources, "CHAIN_LOAD_CONFIG")
                     self.__prime(stage, resources, "CHAIN_LOAD_TARGET")
                     print("Primed - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
+                    self.settings["CHAIN_LOAD_CONFIG"] = expandVars(self.settings["CHAIN_LOAD_CONFIG"])
+                    self.settings["CHAIN_LOAD_TARGET"] = expandVars(self.settings["CHAIN_LOAD_TARGET"])
+
+                    print("Expanded - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
                     #self.chainLoad(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"])
                     #self.mgmt_q.put(
                     #    lambda c=self.settings["CHAIN_LOAD_CONFIG"], t=self.settings["CHAIN_LOAD_TARGET"]: chainLoad(c, t)
@@ -697,30 +738,8 @@ class Job:
         if self.settings["TIMEOUT_{}".format(stage)] != "0": 
             timeout = int(self.settings['TIMEOUT_{}'.format(stage)])
 
-        env = os.environ.copy()
 
-        with open(os.path.join(script_dir, "executor.env.default" ), "r") as env_conf:
-            for e in env_conf:
-                e = e.strip()
-                k,v = e.split("=",1)
-                env[k]=v
-        try:
-
-
-            env_custom = os.path.join(os.path.dirname(targets_list) , "executor.env")
-
-            with open(env_custom, "r") as env_conf:
-                for e in env_conf:
-                    e = e.strip()
-                    k,v = e.split("=",1)
-                    env[k]=v
-
-        except Exception as e:
-            print("WARNING: executor.env not defined for the target directory")
-            env["EXECUTOR_OUTDIR"] = os.path.dirname(targets_list)
-            print("Set outdir to {}".format(env["EXECUTOR_OUTDIR"]))
-
-
+        env = getExecutorEnv()
 
         if cmd:
             if os.name == 'posix':
