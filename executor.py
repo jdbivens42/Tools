@@ -209,7 +209,7 @@ def expandVars(s, default=None, skip_escaped=False):
     return re.sub(reVar, lambda m, env=env: replace_var(m, env) , s)
 
 
-def chainLoad(config_file, target):
+def chainLoad(config_file, target, force=True):
     global jobs
     global settings
     global manager
@@ -232,40 +232,44 @@ def chainLoad(config_file, target):
     if target:
         #print("S: {}".format(s))
         #print("Full: {}".format(full_name))
-        if not manager:
-            print("Manager is false in chainLoad...")
-            BaseManager.register('Job', Job)
-            manager = BaseManager()
-            try:
-                print("starting manager...")
-                manager.start()
-            except Exception as e:
-                print(e)
+        if full_name in jobs or force:
 
-        print("\n\nManager:\n{}\n\n".format(repr(manager)))
+            if not manager:
+                print("Manager is false in chainLoad...")
+                BaseManager.register('Job', Job)
+                manager = BaseManager()
+                try:
+                    print("starting manager...")
+                    manager.start()
+                except Exception as e:
+                    print(e)
 
-        jobs[full_name] = manager.Job(local_settings, (target, full_name), state['queue']['mgmt'])
-        print("job: {} created in chain load".format(full_name))
-        #print("Putting {}".format(full_name))
-        #listbox.insert("", END, values=(s), iid=full_name)
-        print(state['queue']['move'].qsize())
-        state['queue']['move'].put(
-            lambda _j=full_name, _curr_list=None, _new_list='queued',  _tags=(), _values=(target):
-                moveTarget(_j, _curr_list, _new_list, _values, _tags )
-        )
-        print("Move request: {}".format(full_name))
+            print("\n\nManager:\n{}\n\n".format(repr(manager)))
+
+            jobs[full_name] = manager.Job(local_settings, (target, full_name), state['queue']['mgmt'])
+            print("job: {} created in chain load".format(full_name))
+            #print("Putting {}".format(full_name))
+            #listbox.insert("", END, values=(s), iid=full_name)
+            print(state['queue']['move'].qsize())
+            state['queue']['move'].put(
+                lambda _j=full_name, _curr_list=None, _new_list='queued',  _tags=(), _values=(target):
+                    moveTarget(_j, _curr_list, _new_list, _values, _tags )
+            )
+            print("Move request: {}".format(full_name))
+            
+            state['queue']['queued'].put_nowait(full_name)
+
+            print("Queued: {}".format(full_name))
+        #elif s and force:
+        #    print("Attempting to force -- cross your fingers! (seriously though)")
+        #   #ppppppppp
+        #    #crazy dangerous, may desync gui with underlying data
+        #   state['selection'] = 
         
-        state['queue']['queued'].put_nowait(full_name)
-
-        print("Queued: {}".format(full_name))
-    #elif s and force:
-    #    print("Attempting to force -- cross your fingers! (seriously though)")
-    #   #ppppppppp
-    #    #crazy dangerous, may desync gui with underlying data
-    #   state['selection'] = 
-        
+        else:
+            print("Job {!r} is already loaded. Use a different config file to duplicate jobs.".format(full_name))   
     else:
-        print("Job {!r} is already loaded. Use a different config file to duplicate jobs.".format(full_name))   
+        print("Cannot load empty target")
 
 
 
@@ -581,20 +585,16 @@ class Job:
                 #CHECK FOR CHAIN_LOAD
                 if "CHAIN_LOAD_CONFIG" in self.settings:
                     print("Following next link in CHAIN_LOAD...")
-                    print("Priming - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
-                    self.__prime(stage, resources, "CHAIN_LOAD_CONFIG")
-                    self.__prime(stage, resources, "CHAIN_LOAD_TARGET")
-                    print("Primed - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
-                    self.settings["CHAIN_LOAD_CONFIG"] = expandVars(self.settings["CHAIN_LOAD_CONFIG"])
-                    self.settings["CHAIN_LOAD_TARGET"] = expandVars(self.settings["CHAIN_LOAD_TARGET"])
+                    for s in self.settings.keys():
+                        if s.startswith("CHAIN_LOAD"):
+                            #NOTE: This will expand {target} to the current target, not each line if CHAIN_LOAD_FROM_FILE is set
+                            #self.__prime(stage, resources, s)
+                            prime_target = "CHAIN_LOAD_FROM_FILE" not in self.settings or self.settings["CHAIN_LOAD_FROM_FILE"] == "FALSE"
+                            self.__prime(stage, resources, s, prime_target=prime_target)
+                            self.settings[s] = expandVars(self.settings[s])
 
-                    print("Expanded - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
-                    #self.chainLoad(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"])
-                    #self.mgmt_q.put(
-                    #    lambda c=self.settings["CHAIN_LOAD_CONFIG"], t=self.settings["CHAIN_LOAD_TARGET"]: chainLoad(c, t)
-                    #)
+                    #print("Expanded - Config: {} Target: {}".format(self.settings["CHAIN_LOAD_CONFIG"], self.settings["CHAIN_LOAD_TARGET"]))
 
-#pppppppppppppp
                     clconf = self.settings["CHAIN_LOAD_CONFIG"]
                     try:
                         clconf = ast.literal_eval(clconf)
@@ -609,21 +609,23 @@ class Job:
                                 print("Chain Loading From Target File")
                                 with open(self.settings["CHAIN_LOAD_TARGET"], "r") as chain_targets:
                                     for t in chain_targets:
-                                        task = ("chainLoad", conf, t.strip("\r\n")) 
-                                        self.mgmt_q.put(
-                                            task
-                                        )
-                                        print ("CHAIN_LOAD queued task {}!".format(task))
+   #ppppppppppppp 
+                                        if self.__check_chain_load(t):
+                                            task = ("chainLoad", conf, t.strip("\r\n"), self.settings.get("CHAIN_LOAD_FORCE", True) ) 
+                                            self.mgmt_q.put(
+                                                task
+                                            )
+                                            print ("CHAIN_LOAD queued task {}!".format(task))
                             except Exception as e:
                                 print(e)
                         else:
-
-                            task = ("chainLoad", conf, self.settings["CHAIN_LOAD_TARGET"]) 
-                            self.mgmt_q.put(
-                                task
-                            )
-                        
-                            print ("CHAIN_LOAD queued task {}!".format(task))
+                            if self.__check_chain_load(self.target):
+                                task = ("chainLoad", conf, self.settings["CHAIN_LOAD_TARGET"], self.settings.get("CHAIN_LOAD_FORCE", True) ) 
+                                self.mgmt_q.put(
+                                    task
+                                )
+                            
+                                print ("CHAIN_LOAD queued task {}!".format(task))
                 break
 
     def __flush(self, filename, msg):
@@ -809,10 +811,30 @@ class Job:
 
     def isSleeping(self):
         return self.sleeping
-    
-    def __prime(self, stage, resources, k):
+
+    def __check_chain_load(self, target):
+        if not "CHAIN_LOAD_CONDITION" in self.settings:
+            return True
+        self.__prime_target("CHAIN_LOAD_CONDITION", target)
+        # Linux only
+        proc = subprocess.Popen(self.settings["CHAIN_LOAD_CONDITION"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, close_fds=True, env=env)
+        try:
+            stdout, stderr = proc.communicate()
+            return True if proc.returncode == 0 else False
+        except Exception as e:
+            print("Exception raised while evaluating {}".format(self.settings["CHAIN_LOAD_CONDITION"]))
+            print(e)
+
+        return None
+
+    def __prime_target(self, k, target):
+        self.settings[k] = self.unprimed_settings[k].replace(self.settings["TARGET_PLACEHOLDER"], target)    
+
+    def __prime(self, stage, resources, k, prime_target=True):
         # unprimed_settings must be used to allow new resources to be injected in the event of reschedule
-        self.settings[k] = self.unprimed_settings[k].replace(self.settings["TARGET_PLACEHOLDER"], self.target)
+        #self.settings[k] = self.unprimed_settings[k].replace(self.settings["TARGET_PLACEHOLDER"], self.target)
+        if prime_target or k == "CHAIN_LOAD_TARGET":
+            self.__prime_target(k, self.target)
         #if stage==2:
         #   self.settings[k] = self.settings[k].replace(self.settings["TMP_PLACEHOLDER"], resources['outfile'])
         #elif stage==3:
